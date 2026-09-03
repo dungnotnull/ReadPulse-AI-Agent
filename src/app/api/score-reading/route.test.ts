@@ -37,4 +37,16 @@ describe("POST /api/score-reading", () => {
     const res = await POST({ request: new Request("http://x", { method: "POST", body: new FormData() }) } as any);
     expect(res.status).toBe(400);
   });
+  it("422 for grade 1 fall (no published norms)", async () => {
+    const fd = makeForm();
+    fd.set("season", "fall");
+    const res = await POST({ request: new Request("http://x", { method: "POST", body: fd }) } as any);
+    expect(res.status).toBe(422);
+  });
+  it("400 for invalid grade", async () => {
+    const fd = makeForm();
+    fd.set("grade", "9");
+    const res = await POST({ request: new Request("http://x", { method: "POST", body: fd }) } as any);
+    expect(res.status).toBe(400);
+  });
 });

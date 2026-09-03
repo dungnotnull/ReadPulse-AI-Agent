@@ -1,5 +1,8 @@
 import type { NormRow, PercentileResult, Tier } from "./types";
 
+// Typed error for grade/season combinations with no published norms.
+export class NormsUnavailableError extends Error {}
+
 // Hasbrouck, J., & Tindal, G. (2017). An Update to Compiled ORF Norms
 // (Technical Report No. 1702). University of Oregon.
 // Transcribed from the public chart:
@@ -44,9 +47,11 @@ export function estimatePercentile(
   season: "fall" | "winter" | "spring"
 ): PercentileResult {
   const row = HT2017.find((r) => r.grade === grade && r.season === season);
-  if (!row) throw new Error(`No norms for grade ${grade} ${season}`);
+  if (!row) throw new NormsUnavailableError(`No norms for grade ${grade} ${season}`);
   if (row.percentiles[90] === 0) {
-    throw new Error("No published Hasbrouck & Tindal 2017 norms for grade 1 fall - benchmarking unavailable");
+    throw new NormsUnavailableError(
+      "No published Hasbrouck & Tindal 2017 norms for grade 1 fall - benchmarking unavailable"
+    );
   }
   const p = row.percentiles;
   if (wcpm < p[10]) return { estimated: "<10", tier: "at_risk", source: "Hasbrouck & Tindal 2017" };

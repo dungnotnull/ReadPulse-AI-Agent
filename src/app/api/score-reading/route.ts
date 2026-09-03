@@ -1,5 +1,5 @@
 import { transcribeAudio } from "@/lib/assemblyai";
-import { scoreReading } from "@/lib/scoring";
+import { scoreReading, NormsUnavailableError } from "@/lib/scoring";
 import { passageById } from "@/lib/data/passages";
 import { prisma } from "@/lib/db";
 import { randomBytes } from "crypto";
@@ -22,6 +22,14 @@ export async function POST(req: Request) {
   if (!(audio instanceof Blob) || !passageId || !grade || !season) {
     return Response.json({ error: "audio, passageId, grade, season required" }, { status: 400 });
   }
+  const GRADES = [1, 2, 3, 4, 5, 6] as const;
+  const SEASONS = ["fall", "winter", "spring"] as const;
+  if (!GRADES.includes(grade as (typeof GRADES)[number])) {
+    return Response.json({ error: "grade must be one of 1-6" }, { status: 400 });
+  }
+  if (!SEASONS.includes(season as (typeof SEASONS)[number])) {
+    return Response.json({ error: "season must be fall, winter, or spring" }, { status: 400 });
+  }
   try {
     const passage = passageById(passageId);
     const words = await transcribeAudio(audio);
@@ -41,11 +49,8 @@ export async function POST(req: Request) {
     return Response.json({ score, reportSlug: slug });
   } catch (e) {
     const msg = String(e);
-    if (msg.includes("grade 1 fall")) {
-      return Response.json(
-        { error: "No published norms for grade 1 fall - benchmarking unavailable" },
-        { status: 422 }
-      );
+    if (e instanceof NormsUnavailableError) {
+      return Response.json({ error: msg }, { status: 422 });
     }
     if (msg.includes("Unknown passage")) {
       return Response.json({ error: msg }, { status: 400 });
