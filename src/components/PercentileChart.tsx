@@ -3,16 +3,28 @@ import { ReferenceArea, ReferenceLine, ResponsiveContainer, ScatterChart, XAxis,
 
 // National percentile bands per Hasbrouck & Tindal (2017) tiers:
 // <10th at risk, 10th-25th below benchmark, >25th on track.
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+}
+
 export default function PercentileChart({ estimated, tier }: { estimated: number | "<10" | ">90"; tier: string }) {
   const x = typeof estimated === "number" ? estimated : estimated === "<10" ? 5 : 95;
   const label =
     typeof estimated === "number"
-      ? `~${estimated}th percentile`
+      ? `~${ordinal(estimated)} percentile`
       : estimated === "<10"
         ? "below 10th percentile"
         : "above 90th percentile";
   return (
-    <div className="h-28 w-full" data-testid="percentile-chart" data-tier={tier}>
+    <div
+      className="h-28 w-full"
+      role="img"
+      aria-label={`${label}, tier: ${tier}`}
+      data-testid="percentile-chart"
+      data-tier={tier}
+    >
       <ResponsiveContainer>
         <ScatterChart margin={{ top: 18, right: 24, bottom: 0, left: 24 }}>
           <XAxis

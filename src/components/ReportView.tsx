@@ -113,7 +113,7 @@ export default function ReportView({ childName, grade, season, passageTitle, sco
             {missedWords.map((missed, index) => {
               let text: string;
               if (missed.type === "substitution") {
-                text = `${missed.expected} -> ${missed.got ?? "?"}`;
+                text = `${missed.expected} → ${missed.got ?? "?"}`;
               } else if (missed.type === "hesitation") {
                 text = `${missed.expected} (hesitated)`;
               } else {
