@@ -43,10 +43,12 @@ describe("estimatePercentile", () => {
     expect(estimatePercentile(row.percentiles[50], 2, "spring").estimated).toBe(50);
   });
   it("interpolates linearly between anchors", () => {
+    // Anchors: p50 = 100, p75 = 124. mid = 112 -> t = 0.5 ->
+    // 50 + 0.5 * (75 - 50) = 62.5 -> Math.round = 63.
     const mid = (row.percentiles[50] + row.percentiles[75]) / 2;
-    const res = estimatePercentile(mid, 2, "spring").estimated;
-    expect(res).toBeGreaterThanOrEqual(50);
-    expect(res).toBeLessThanOrEqual(75);
+    const res = estimatePercentile(mid, 2, "spring");
+    expect(res.estimated).toBe(63);
+    expect(res.tier).toBe("on_track");
   });
   it("throws for grade 1 fall (no published norms) instead of a misleading result", () => {
     expect(() => estimatePercentile(20, 1, "fall")).toThrow(/grade 1 fall/);

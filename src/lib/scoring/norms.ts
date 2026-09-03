@@ -1,4 +1,4 @@
-import type { NormRow } from "./types";
+import type { NormRow, PercentileResult, Tier } from "./types";
 
 // Hasbrouck, J., & Tindal, G. (2017). An Update to Compiled ORF Norms
 // (Technical Report No. 1702). University of Oregon.
@@ -30,9 +30,7 @@ export const HT2017: NormRow[] = [
   { grade: 6, season: "spring", percentiles: { 10: 91, 25: 122, 50: 146, 75: 173, 90: 204 } },
 ];
 
-export function tierFromPercentile(
-  p: number | "<10" | ">90"
-): "at_risk" | "below_benchmark" | "on_track" {
+export function tierFromPercentile(p: number | "<10" | ">90"): Tier {
   if (p === "<10") return "at_risk";
   if (p === ">90") return "on_track";
   if (p < 10) return "at_risk";
@@ -44,11 +42,7 @@ export function estimatePercentile(
   wcpm: number,
   grade: 1 | 2 | 3 | 4 | 5 | 6,
   season: "fall" | "winter" | "spring"
-): {
-  estimated: number | "<10" | ">90";
-  tier: "at_risk" | "below_benchmark" | "on_track";
-  source: "Hasbrouck & Tindal 2017";
-} {
+): PercentileResult {
   const row = HT2017.find((r) => r.grade === grade && r.season === season);
   if (!row) throw new Error(`No norms for grade ${grade} ${season}`);
   if (row.percentiles[90] === 0) {
