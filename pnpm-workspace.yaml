@@ -1,0 +1,10 @@
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: true
+  unrs-resolver: true
+  workerd: true
+  sharp: true
+  "@tailwindcss/oxide": true
+  "@prisma/engines": true
+  prisma: true
+  "@prisma/client": true
