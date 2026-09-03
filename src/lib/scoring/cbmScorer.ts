@@ -24,7 +24,7 @@ interface ScoreInput {
 // engine scores normalized tokens, so "well-known" read correctly counts as two.
 // Shipped passages contain no hyphenated words, so WCPM is unaffected; documented
 // in METHODOLOGY.md as an implementation deviation.
-function mapTokensToSources<T>(sources: string[]): { norms: string[]; sourceOf: number[] } {
+function mapTokensToSources(sources: string[]): { norms: string[]; sourceOf: number[] } {
   const norms: string[] = [];
   const sourceOf: number[] = [];
   sources.forEach((text, sourceIndex) => {

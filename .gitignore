@@ -39,3 +39,6 @@ next-env.d.ts
 *.db
 validation/recordings/*.wav
 validation/recordings/*.webm
+
+# local env
+.env
