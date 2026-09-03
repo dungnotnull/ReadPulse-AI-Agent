@@ -1,0 +1,26 @@
+[
+  {
+    "file": "r00-smoke.wav",
+    "human": {
+      "file": "r00-smoke.wav",
+      "passage_id": "g1-cat-ball",
+      "grade": 1,
+      "season": "spring",
+      "human_wcpm": 105,
+      "human_accuracy_pct": 100,
+      "notes": "TTS sanity recording"
+    },
+    "system": {
+      "wcpm": 331.5,
+      "accuracyPct": 12.7,
+      "counts": {
+        "correct": 7,
+        "substitutions": 0,
+        "omissions": 48,
+        "insertions": 0,
+        "hesitations": 0,
+        "selfCorrections": 0
+      }
+    }
+  }
+]

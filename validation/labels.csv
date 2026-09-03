@@ -1,0 +1,2 @@
+file,passage_id,grade,season,human_wcpm,human_accuracy_pct,human_substitutions,human_omissions,human_insertions,human_self_corrections,human_hesitations,notes
+r00-smoke.wav,g1-cat-ball,1,spring,105,100,0,0,0,0,0,TTS sanity recording

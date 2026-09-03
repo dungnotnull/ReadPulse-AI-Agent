@@ -10,6 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx scripts/seed-report.ts",
+    "validation:run": "tsx scripts/validation/run-scoring.ts",
+    "validation:analyze": "tsx scripts/validation/analyze.ts",
     "e2e": "pnpm seed && playwright test"
   },
   "dependencies": {
