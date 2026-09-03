@@ -154,16 +154,17 @@ export default function SessionClient(props: {
     setPhase("reading");
     setCountdown(60);
     countdownIntervalRef.current = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev === null) return prev;
-        if (prev <= 1) {
-          void submitReading();
-          return 0;
-        }
-        return prev - 1;
-      });
+      setCountdown((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
     }, 1000);
-  }, [startCapture, submitReading]);
+  }, [startCapture]);
+
+  // Finish the reading phase when the countdown hits 0 (effect keeps side effects
+  // out of the state updater; submitReading sets phase synchronously so this fires once).
+  useEffect(() => {
+    if (phase === "reading" && countdown === 0) {
+      void submitReading();
+    }
+  }, [phase, countdown, submitReading]);
 
   const startRanCapture = useCallback(() => {
     startCapture();
