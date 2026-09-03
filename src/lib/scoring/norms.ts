@@ -8,7 +8,7 @@ import type { NormRow } from "./types";
 // https://www.readnaturally.com/article/hasbrouck-tindal-oral-reading-fluency-data-2017
 // Every value was copied from the fetched table at transcription time (2026-09).
 // Note: the source table leaves grade 1 fall cells blank (no published norms);
-// those anchors are represented here as 0.
+// those anchors are represented here as 0, and estimatePercentile throws for this row.
 export const HT2017: NormRow[] = [
   { grade: 1, season: "fall", percentiles: { 10: 0, 25: 0, 50: 0, 75: 0, 90: 0 } },
   { grade: 1, season: "winter", percentiles: { 10: 9, 25: 16, 50: 29, 75: 59, 90: 97 } },
@@ -51,6 +51,9 @@ export function estimatePercentile(
 } {
   const row = HT2017.find((r) => r.grade === grade && r.season === season);
   if (!row) throw new Error(`No norms for grade ${grade} ${season}`);
+  if (row.percentiles[90] === 0) {
+    throw new Error("No published Hasbrouck & Tindal 2017 norms for grade 1 fall - benchmarking unavailable");
+  }
   const p = row.percentiles;
   if (wcpm < p[10]) return { estimated: "<10", tier: "at_risk", source: "Hasbrouck & Tindal 2017" };
   if (wcpm > p[90]) return { estimated: ">90", tier: "on_track", source: "Hasbrouck & Tindal 2017" };
@@ -73,5 +76,5 @@ export function estimatePercentile(
       };
     }
   }
-  return { estimated: 50, tier: "on_track", source: "Hasbrouck & Tindal 2017" }; // unreachable
+  throw new Error("estimatePercentile: WCPM fell outside all anchor intervals");
 }

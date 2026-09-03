@@ -48,6 +48,10 @@ describe("estimatePercentile", () => {
     expect(res).toBeGreaterThanOrEqual(50);
     expect(res).toBeLessThanOrEqual(75);
   });
+  it("throws for grade 1 fall (no published norms) instead of a misleading result", () => {
+    expect(() => estimatePercentile(20, 1, "fall")).toThrow(/grade 1 fall/);
+    expect(() => estimatePercentile(0, 1, "fall")).toThrow(/grade 1 fall/);
+  });
 });
 
 describe("tierFromPercentile", () => {
