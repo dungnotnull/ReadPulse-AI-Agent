@@ -230,7 +230,7 @@ export function useVoiceAgent() {
         }
       };
 
-      // Mic pipeline (audio itself is gated on readyRef in the worklet handler)
+      // Mic pipeline (only the WS send is gated on readyRef; local capture is not)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (epoch !== connectEpochRef.current) {
         stream.getTracks().forEach((t) => t.stop());
@@ -254,14 +254,17 @@ export function useVoiceAgent() {
         return;
       }
       node.port.onmessage = (e) => {
-        if (!readyRef.current) return; // per factsheet: audio only after session.ready
         const f32 = e.data as Float32Array;
         const i16 = new Int16Array(f32.length);
         for (let k = 0; k < f32.length; k++) {
           const s = Math.max(-1, Math.min(1, f32[k]));
           i16[k] = s < 0 ? s * 0x8000 : s * 0x7fff;
         }
+        // Local capture must receive every raw chunk regardless of WS state,
+        // so scoring survives a mid-reading connection drop.
         if (capturingRef.current) captureRef.current.push(i16);
+        // Only the outbound send is gated on session.ready (per factsheet).
+        if (!readyRef.current) return;
         // Batch outgoing audio to ~100ms (2400 samples at 24kHz) to reduce message overhead.
         sendBufferRef.current.push(i16);
         sendBufferSamplesRef.current += i16.length;

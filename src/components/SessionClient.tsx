@@ -99,9 +99,12 @@ export default function SessionClient(props: {
   const [statusLine, setStatusLine] = useState("connecting");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [ranBusy, setRanBusy] = useState(false);
 
   const scoreRef = useRef<ReadingScore | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const submittingRef = useRef(false);
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Connect the agent once on mount; cleanup tears the session down on unmount.
   useEffect(() => {
@@ -110,21 +113,26 @@ export default function SessionClient(props: {
     });
     return () => {
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
       disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Posts the captured WAV to /api/score-reading and transitions to the result phase.
+  // submittingRef makes single-submission structural: both entry paths (button and
+  // countdown effect) are covered against double invocation.
   const submitReading = useCallback(async () => {
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-      countdownIntervalRef.current = null;
-    }
-    const wav = stopCapture();
-    setCountdown(null);
-    setPhase("scoring");
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     try {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+      const wav = stopCapture();
+      setCountdown(null);
+      setPhase("scoring");
       const form = new FormData();
       form.append("audio", new File([wav], "reading.wav", { type: "audio/wav" }));
       form.append("passageId", passageId);
@@ -146,17 +154,19 @@ export default function SessionClient(props: {
       setScore(null);
     } finally {
       setPhase("result");
+      submittingRef.current = false;
     }
   }, [childName, grade, passageId, season, stopCapture]);
 
   const startReading = useCallback(() => {
+    if (phase !== "intro" || countdownIntervalRef.current) return;
     startCapture();
     setPhase("reading");
     setCountdown(60);
     countdownIntervalRef.current = setInterval(() => {
       setCountdown((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
     }, 1000);
-  }, [startCapture]);
+  }, [phase, startCapture]);
 
   // Finish the reading phase when the countdown hits 0 (effect keeps side effects
   // out of the state updater; submitReading sets phase synchronously so this fires once).
@@ -174,6 +184,7 @@ export default function SessionClient(props: {
   const finishRan = useCallback(async () => {
     const wav = stopCapture();
     setPhase("ranScoring");
+    setRanBusy(true);
     try {
       const form = new FormData();
       form.append("audio", new File([wav], "ran.wav", { type: "audio/wav" }));
@@ -186,16 +197,20 @@ export default function SessionClient(props: {
       const body = (await res.json()) as { score: RanScore };
       setRanScore(body.score);
       if (slug) {
-        await fetch("/api/report", {
+        const patchRes = await fetch("/api/report", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ slug, ranScore: body.score }),
         });
+        // Non-blocking: the RAN result is still shown even if attaching it to the report fails.
+        setError(patchRes.ok ? null : "Could not attach naming score to report");
+      } else {
+        setError(null);
       }
-      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      setRanBusy(false);
       setPhase("ranResult");
     }
   }, [slug, stopCapture]);
@@ -207,7 +222,8 @@ export default function SessionClient(props: {
     if (!shareLink) return;
     void navigator.clipboard.writeText(shareLink).then(() => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+      copiedTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
     });
   }, [shareLink]);
 
@@ -261,26 +277,16 @@ export default function SessionClient(props: {
         </section>
       )}
 
-      {phase === "result" && (
+      {phase === "result" && score && (
         <section className="rounded-lg border p-6 space-y-4">
-          {score ? (
-            <ReportView
-              childName={childName || null}
-              grade={grade}
-              season={season}
-              passageTitle={passage.title}
-              score={score}
-              ran={ranScore}
-            />
-          ) : (
-            <div className="space-y-2">
-              <p className="font-semibold text-red-600">Scoring failed</p>
-              <p className="text-sm text-gray-600">{error}</p>
-              <a href="/" className="text-sm text-blue-600 underline">
-                Try again
-              </a>
-            </div>
-          )}
+          <ReportView
+            childName={childName || null}
+            grade={grade}
+            season={season}
+            passageTitle={passage.title}
+            score={score}
+            ran={ranScore}
+          />
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -304,6 +310,16 @@ export default function SessionClient(props: {
               Finish and get report link
             </button>
           </div>
+        </section>
+      )}
+
+      {phase === "result" && !score && (
+        <section className="rounded-lg border p-6 space-y-2">
+          <p className="font-semibold text-red-600">Scoring failed</p>
+          <p className="text-sm text-gray-600">{error}</p>
+          <a href="/" className="text-sm text-blue-600 underline">
+            Start over
+          </a>
         </section>
       )}
 
@@ -351,7 +367,8 @@ export default function SessionClient(props: {
           <button
             type="button"
             onClick={() => void finishRan()}
-            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+            disabled={ranBusy}
+            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             Done
           </button>
