@@ -93,7 +93,7 @@ export default function SessionClient(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { connected, connect, disconnect, startCapture, stopCapture } = useVoiceAgent();
+  const { connected, connect, disconnect, send, startCapture, stopCapture } = useVoiceAgent();
 
   const [phase, setPhase] = useState<Phase>("intro");
   const [score, setScore] = useState<ReadingScore | null>(null);
@@ -263,6 +263,16 @@ export default function SessionClient(props: {
     setPracticeIndex((i) => i + 1);
   }, []);
 
+  // One-shot agent speech via the verified reply.create message (see voice agent factsheet).
+  const sayWord = useCallback(() => {
+    const word = drillWords[practiceIndex];
+    if (!word) return;
+    send({
+      type: "reply.create",
+      instructions: `Say the word "${word.expected}" clearly, then ask the child to repeat it.`,
+    });
+  }, [drillWords, practiceIndex, send]);
+
   // Auto-detect: when a final user transcript contains the current drill word
   // (normalized token membership), mark it practiced and advance. Consuming the
   // transcript prevents re-triggering on the same utterance.
@@ -403,11 +413,10 @@ export default function SessionClient(props: {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled
-                  title="Agent speech triggering is not supported by the voice API; ask a parent or teacher to say the word aloud."
-                  className="rounded border px-4 py-2 text-gray-400 cursor-not-allowed"
+                  onClick={sayWord}
+                  className="rounded border px-4 py-2 hover:bg-gray-50"
                 >
-                  Ask ReadPulse to say it
+                  ReadPulse says the word
                 </button>
                 <button
                   type="button"

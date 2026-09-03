@@ -37,6 +37,7 @@ Authoritative reference snapshot used by this project. Source: AssemblyAI "Start
 - Tool results: execute locally, send `{ "type": "tool.result", "call_id": "...", "result": "<JSON string>" }` AFTER reply.done fires. If reply.done.status == "interrupted" (barge-in), DISCARD pending tool results.
 - Playback: write each reply.audio PCM chunk directly into an audio buffer queue; never sleep-schedule. On interrupted: flush the buffer.
 - Resume: within 30s of disconnect, reconnect with a NEW token + `session.resume` carrying previous session_id.
+- `reply.create` (client -> server, verified in official API spec 2026-09-03): `{ "type": "reply.create", "instructions": "..." }` — ask the agent to generate and speak a reply RIGHT NOW with one-shot instructions (does not modify system_prompt). Primary use: status updates during hold-mode tool calls; also usable to make the agent speak on demand (e.g. practice-loop word prompts).
 
 ## Transcription (scoring layer)
 
