@@ -4,6 +4,7 @@ import { useVoiceAgent } from "@/hooks/useVoiceAgent";
 import { passageById } from "@/lib/data/passages";
 import ReportView from "@/components/ReportView";
 import PassageCard from "@/components/PassageCard";
+import RanGrid from "@/components/RanGrid";
 import type { RanScore, ReadingScore } from "@/lib/scoring/types";
 
 // Exact protocol prompt; do not paraphrase (scientific protocol requirement).
@@ -350,20 +351,25 @@ export default function SessionClient(props: {
 
       {phase === "ran" && (
         <section className="rounded-lg border p-6 space-y-4">
-          <p className="text-gray-600">Naming game loads here (Task 15)</p>
+          <h2 className="text-lg font-semibold">Rapid Naming Game</h2>
+          <p className="text-sm text-gray-600">
+            Name each color out loud, left to right, top to bottom, as fast as you can.
+          </p>
+          <RanGrid variant="colors" />
           <button
             type="button"
             onClick={startRanCapture}
             className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
           >
-            Start capture
+            Start naming
           </button>
         </section>
       )}
 
       {phase === "ranScoring" && (
         <section className="rounded-lg border p-6 space-y-4">
-          <p className="text-gray-600">Capture running. Say the colors as fast as you can.</p>
+          <RanGrid variant="colors" />
+          <p className="text-sm text-gray-500">Take your time, then press Done.</p>
           <button
             type="button"
             onClick={() => void finishRan()}
@@ -379,15 +385,29 @@ export default function SessionClient(props: {
         <section className="rounded-lg border p-6 space-y-4">
           <h2 className="text-lg font-semibold">Naming game result</h2>
           {ranScore ? (
-            <ul className="text-sm text-gray-700 space-y-1" data-testid="ran-result">
-              <li>
-                Named {ranScore.stimuliNamed}/{ranScore.stimuliTotal} items
-              </li>
-              <li>{ranScore.secondsElapsed.toFixed(1)} seconds</li>
-              <li>
-                {ranScore.itemsPerSecond.toFixed(2)} items/second ({ranScore.flag})
-              </li>
-            </ul>
+            <div className="space-y-2" data-testid="ran-result">
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-700">
+                  Items named: {ranScore.stimuliNamed} of {ranScore.stimuliTotal}
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    ranScore.flag === "typical"
+                      ? "bg-green-100 text-green-800"
+                      : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {ranScore.flag === "typical" ? "Typical" : "Slow"}
+                </span>
+              </div>
+              <p className="text-sm text-gray-700">
+                Speed: {ranScore.itemsPerSecond.toFixed(2)} items/sec
+              </p>
+              <p className="text-xs text-gray-500">
+                Naming speed is an additional signal linked to reading development - not a
+                diagnosis.
+              </p>
+            </div>
           ) : (
             <p className="text-sm text-red-600">{error ?? "RAN scoring unavailable."}</p>
           )}
