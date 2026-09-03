@@ -66,6 +66,9 @@ export function useVoiceAgent() {
   const pendingToolResults = useRef(new Map<string, string>());
   const playbackQueue = useRef<Float32Array[]>([]);
   const playingRef = useRef(false);
+  const connectEpochRef = useRef(0);
+  const sendBufferRef = useRef<Int16Array[]>([]);
+  const sendBufferSamplesRef = useRef(0);
 
   const send = useCallback((msg: unknown) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(msg));
@@ -93,7 +96,7 @@ export function useVoiceAgent() {
     playingRef.current = true;
     while (playbackQueue.current.length > 0 && ctxRef.current) {
       const f32 = playbackQueue.current.shift()!;
-      const buf = ctxRef.current.createBuffer(1, f32.length, 24000);
+      const buf = ctxRef.current.createBuffer(1, f32.length, ctxRef.current.sampleRate);
       buf.copyToChannel(new Float32Array(f32), 0);
       const src = ctxRef.current.createBufferSource();
       src.buffer = buf;
@@ -106,19 +109,56 @@ export function useVoiceAgent() {
     playingRef.current = false;
   }, []);
 
+  const disconnect = useCallback(() => {
+    connectEpochRef.current++; // invalidate any in-flight connect()
+    readyRef.current = false;
+    sendBufferRef.current = [];
+    sendBufferSamplesRef.current = 0;
+    try {
+      wsRef.current?.close();
+    } catch {
+      // already closed
+    }
+    nodeRef.current?.disconnect();
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    void ctxRef.current?.close().catch(() => undefined);
+    setConnected(false);
+  }, []);
+
   const handleToolCall = useCallback(async (msg: { call_id: string; name: string; arguments?: string }) => {
-    const args = msg.arguments ? (JSON.parse(msg.arguments) as Record<string, unknown>) : {};
+    let args: Record<string, unknown> = {};
+    if (msg.arguments) {
+      try {
+        args = JSON.parse(msg.arguments) as Record<string, unknown>;
+      } catch {
+        args = {};
+      }
+    }
     const result = await cfgRef.current?.onToolCall?.(msg.name, args);
     pendingToolResults.current.set(msg.call_id, JSON.stringify(result ?? { ok: true }));
   }, []);
 
   const connect = useCallback(
     async (cfg: VoiceAgentConfig) => {
+      // Tear down any prior session before opening a new one (double-connect leak).
+      disconnect();
+      const epoch = ++connectEpochRef.current;
       cfgRef.current = cfg;
       const tokenRes = await fetch("/api/session-token", { method: "POST" });
+      if (epoch !== connectEpochRef.current) return;
       const { token } = (await tokenRes.json()) as { token: string };
       const ws = new WebSocket(`wss://agents.assemblyai.com/v1/ws?token=${token}`);
       wsRef.current = ws;
+
+      ws.onclose = () => {
+        if (epoch !== connectEpochRef.current) return; // expected close from our disconnect
+        readyRef.current = false;
+        setConnected(false);
+        cfg.onStatus?.("closed");
+      };
+      ws.onerror = () => {
+        cfg.onStatus?.("error: websocket");
+      };
 
       ws.onopen = () => {
         // Flat session schema per factsheet; sent immediately on open.
@@ -192,13 +232,27 @@ export function useVoiceAgent() {
 
       // Mic pipeline (audio itself is gated on readyRef in the worklet handler)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (epoch !== connectEpochRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
       const ctx = new AudioContext({ sampleRate: 24000 });
-      ctxRef.current = ctx;
       await ctx.audioWorklet.addModule("/worklet/pcm-worklet.js");
+      if (epoch !== connectEpochRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        void ctx.close().catch(() => undefined);
+        return;
+      }
+      ctxRef.current = ctx;
       const src = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, "pcm-worklet");
       nodeRef.current = node;
+      if (epoch !== connectEpochRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        void ctx.close().catch(() => undefined);
+        return;
+      }
       node.port.onmessage = (e) => {
         if (!readyRef.current) return; // per factsheet: audio only after session.ready
         const f32 = e.data as Float32Array;
@@ -208,12 +262,25 @@ export function useVoiceAgent() {
           i16[k] = s < 0 ? s * 0x8000 : s * 0x7fff;
         }
         if (capturingRef.current) captureRef.current.push(i16);
-        send({ type: "input.audio", audio: i16ToBase64(i16) });
+        // Batch outgoing audio to ~100ms (2400 samples at 24kHz) to reduce message overhead.
+        sendBufferRef.current.push(i16);
+        sendBufferSamplesRef.current += i16.length;
+        if (sendBufferSamplesRef.current >= 2400) {
+          const merged = new Int16Array(sendBufferSamplesRef.current);
+          let off = 0;
+          for (const chunk of sendBufferRef.current) {
+            merged.set(chunk, off);
+            off += chunk.length;
+          }
+          sendBufferRef.current = [];
+          sendBufferSamplesRef.current = 0;
+          send({ type: "input.audio", audio: i16ToBase64(merged) });
+        }
       };
       src.connect(node);
       // note: worklet node NOT connected to destination (no passthrough playback)
     },
-    [flushToolResults, handleToolCall, playQueue, send],
+    [disconnect, flushToolResults, handleToolCall, playQueue, send],
   );
 
   const startCapture = useCallback(() => {
@@ -226,19 +293,6 @@ export function useVoiceAgent() {
     const wav = encodeWav(captureRef.current, 24000);
     captureRef.current = [];
     return wav;
-  }, []);
-
-  const disconnect = useCallback(() => {
-    readyRef.current = false;
-    try {
-      wsRef.current?.close();
-    } catch {
-      // already closed
-    }
-    nodeRef.current?.disconnect();
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    void ctxRef.current?.close().catch(() => undefined);
-    setConnected(false);
   }, []);
 
   useEffect(() => () => disconnect(), [disconnect]);
