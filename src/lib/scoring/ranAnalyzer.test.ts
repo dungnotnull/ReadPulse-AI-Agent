@@ -29,4 +29,17 @@ describe("analyzeRan", () => {
     const r = analyzeRan({ stimuli, transcript });
     expect(r.flag).toBe("slow");
   });
+  it("isolated filler words between names do not poison matching", () => {
+    const seq = ["red", "blue", "green"];
+    const transcript = ["red", "um", "blue", "uh", "green"].map((s, k) => w(s, k));
+    const r = analyzeRan({ stimuli: seq, transcript });
+    expect(r.stimuliNamed).toBe(3);
+  });
+  it("empty transcript yields zeros with typical flag (no division by zero)", () => {
+    const r = analyzeRan({ stimuli, transcript: [] });
+    expect(r.stimuliNamed).toBe(0);
+    expect(r.secondsElapsed).toBe(0);
+    expect(r.itemsPerSecond).toBe(0);
+    expect(r.flag).toBe("typical");
+  });
 });
