@@ -1,6 +1,16 @@
 # Task 0: AssemblyAI Endpoint Check
 
-**Status: PENDING until AAI_API_KEY is set in .env.local**
+**Status: RESOLVED (2026-09-03)** — endpoints verified against AssemblyAI's official coding-agent documentation; canonical facts live in `docs/superpowers/specs/assemblyai-voice-agent-facts.md`:
+
+- Voice Agent temp token: `GET https://agents.assemblyai.com/v1/token?expires_in_seconds=...` with `Authorization: Bearer <key>`
+- Transcription (<=120s clips): `POST https://sync.assemblyai.com/transcribe` (multipart, `X-AAI-Model: universal-3-5-pro`)
+- Async fallback: `POST /v2/upload` (raw binary) + `POST /v2/transcript` with `speech_models: ["universal-3-5-pro", "universal-2"]`
+
+Task 9's live smoke test (real key) is the runtime confirmation. Original pending-check commands kept below for reference.
+
+---
+
+**Status (original): PENDING until AAI_API_KEY is set in .env.local**
 
 Run the following commands to verify the AssemblyAI endpoints before wiring up the voice agent (Task 9).
 

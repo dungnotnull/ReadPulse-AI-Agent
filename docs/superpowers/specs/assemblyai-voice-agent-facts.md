@@ -44,6 +44,7 @@ Authoritative reference snapshot used by this project. Source: AssemblyAI "Start
 - Limits: 80ms-120s, <=40MB, PCM/WAV 16-bit, mono/stereo, sample rate in {8000,16000,22050,24000,32000,44100,48000}
 - Response (single round trip, no polling): `{ text, words: [{text, start, end, confidence}], confidence, audio_duration_ms, session_id }` — timings in ms
 - config part fields: prompt (<=4096 chars), keyterms_prompt (<=2048 chars), language_code ("en")
+- CORRECTION (live smoke, 2026-09-03): word `start`/`end` are OMITTED by default. Config must set `timestamps: true` (https://www.assemblyai.com/docs/sync-stt/word-timestamps). Also: audio Blob needs an explicit MIME type (e.g. audio/wav) or the API returns 415 for application/octet-stream.
 
 ### Async API (fallback for long audio)
 - `POST https://api.assemblyai.com/v2/upload` — RAW BINARY body (not multipart), raw-key Authorization -> `{upload_url}`
