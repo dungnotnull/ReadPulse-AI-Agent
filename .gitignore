@@ -42,3 +42,7 @@ validation/recordings/*.webm
 
 # local env
 .env
+
+# Playwright artifacts
+test-results/
+playwright-report/
