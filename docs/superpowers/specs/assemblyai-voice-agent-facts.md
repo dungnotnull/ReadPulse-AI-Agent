@@ -33,6 +33,7 @@ Authoritative reference snapshot used by this project. Source: AssemblyAI "Start
 - Client -> server: `{ "type": "input.audio", "audio": "<base64>" }` (field name is `audio`)
 - Server -> client events: session.ready, session.error/error, input.speech.started/stopped, transcript.user.delta / transcript.user (final), reply.started, reply.audio (base64 PCM16 24k in field `data`), transcript.agent, reply.done (status completed|interrupted), tool.call {call_id, name, arguments}
   - FIELD ASYMMETRY: input audio field = `audio`; reply audio field = `data`
+  - Also observed live (2026-09-03): `session.updated` (ack of session.update) and `transcript.agent.delta` (partial agent text) — ignore safely if unhandled
 - Tool results: execute locally, send `{ "type": "tool.result", "call_id": "...", "result": "<JSON string>" }` AFTER reply.done fires. If reply.done.status == "interrupted" (barge-in), DISCARD pending tool results.
 - Playback: write each reply.audio PCM chunk directly into an audio buffer queue; never sleep-schedule. On interrupted: flush the buffer.
 - Resume: within 30s of disconnect, reconnect with a NEW token + `session.resume` carrying previous session_id.
