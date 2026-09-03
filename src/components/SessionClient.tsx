@@ -24,6 +24,7 @@ Rules:
 
 type Phase =
   | "intro"
+  | "greeting"
   | "reading"
   | "scoring"
   | "result"
@@ -48,9 +49,6 @@ export default function SessionClient(props: {
       passage,
       agentConfig: {
         instructions: buildInstructions(childName, grade, passage.title),
-        greeting: childName
-          ? `Hi ${childName}! I'm ReadPulse. Let's read together!`
-          : "Hi! I'm ReadPulse. Let's read together!",
         tools: [
           {
             name: "score_reading",
@@ -73,7 +71,24 @@ export default function SessionClient(props: {
           setTranscript(text);
           if (isFinal) setFinalTranscript(text);
         },
-        onStatus: (s: string) => setStatusLine(s),
+        onStatus: (s: string) => {
+          setStatusLine(s);
+          // The greeting reply finished speaking (user gesture already resumed audio):
+          // start mic capture and hand the floor to the child.
+          if (s === "reply.done" && phaseRef.current === "greeting") {
+            startReading();
+          }
+        },
+        onSpeechStarted: () => {
+          // The 60s reading window starts on the child's FIRST speech, not on
+          // entering the reading phase. Guarded by phase and existing interval.
+          if (phaseRef.current === "reading" && !countdownIntervalRef.current) {
+            setCountdown(60);
+            countdownIntervalRef.current = setInterval(() => {
+              setCountdown((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
+            }, 1000);
+          }
+        },
         onToolCall: async (name: string) => {
           if (name === "score_reading") {
             return scoreRef.current ?? { pending: true };
@@ -82,7 +97,7 @@ export default function SessionClient(props: {
             return scoreRef.current?.missedWords ?? [];
           }
           if (name === "start_ran_task") {
-            setPhase("ran");
+            goPhase("ran");
             return { started: true };
           }
           return { ok: true };
@@ -93,9 +108,16 @@ export default function SessionClient(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { connected, connect, disconnect, send, startCapture, stopCapture } = useVoiceAgent();
+  const { connected, connect, disconnect, send, startCapture, stopCapture, resumeAudio } =
+    useVoiceAgent();
 
   const [phase, setPhase] = useState<Phase>("intro");
+  // Mirror of phase for callbacks inside the memoized agent config (no stale closure).
+  const phaseRef = useRef<Phase>("intro");
+  const goPhase = useCallback((p: Phase) => {
+    phaseRef.current = p;
+    setPhase(p);
+  }, []);
   const [score, setScore] = useState<ReadingScore | null>(null);
   const [slug, setSlug] = useState<string | null>(null);
   const [ranScore, setRanScore] = useState<RanScore | null>(null);
@@ -144,11 +166,11 @@ export default function SessionClient(props: {
         // Header-only WAV: no audio was captured; do not round-trip the API.
         setError("No audio captured - check your microphone and try again");
         setScore(null);
-        setPhase("result");
+        goPhase("result");
         submittingRef.current = false;
         return;
       }
-      setPhase("scoring");
+      goPhase("scoring");
       const form = new FormData();
       form.append("audio", new File([wav], "reading.wav", { type: "audio/wav" }));
       form.append("passageId", passageId);
@@ -169,20 +191,35 @@ export default function SessionClient(props: {
       setError(e instanceof Error ? e.message : String(e));
       setScore(null);
     } finally {
-      setPhase("result");
+      goPhase("result");
       submittingRef.current = false;
     }
   }, [childName, grade, passageId, season, stopCapture]);
 
+  // Enters the reading phase after the greeting reply finished (or via the manual
+  // fallback). The 60s countdown is NOT started here - it starts on first speech.
   const startReading = useCallback(() => {
-    if (phase !== "intro" || countdownIntervalRef.current) return;
+    if (phaseRef.current !== "greeting" || countdownIntervalRef.current) return;
     startCapture();
-    setPhase("reading");
-    setCountdown(60);
-    countdownIntervalRef.current = setInterval(() => {
-      setCountdown((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
-    }, 1000);
-  }, [phase, startCapture]);
+    goPhase("reading");
+  }, [goPhase, startCapture]);
+
+  // Manual fallback from the greeting phase in case reply.create fails silently.
+  const skipGreeting = useCallback(() => {
+    resumeAudio();
+    startReading();
+  }, [resumeAudio, startReading]);
+
+  // One button press: resume audio behind a real gesture, ask the agent to greet
+  // verbally, then wait for reply.done to hand over to the reading phase.
+  const startSession = useCallback(() => {
+    resumeAudio();
+    send({
+      type: "reply.create",
+      instructions: `Greet the child warmly by name in one short sentence, then say: "When you are ready, read the passage aloud. I will listen quietly."`,
+    });
+    goPhase("greeting");
+  }, [goPhase, resumeAudio, send]);
 
   // Finish the reading phase when the countdown hits 0 (effect keeps side effects
   // out of the state updater; submitReading sets phase synchronously so this fires once).
@@ -194,7 +231,7 @@ export default function SessionClient(props: {
 
   const startRanCapture = useCallback(() => {
     startCapture();
-    setPhase("ranScoring");
+    goPhase("ranScoring");
   }, [startCapture]);
 
   const finishRan = useCallback(async () => {
@@ -202,10 +239,10 @@ export default function SessionClient(props: {
     if (wav.size <= 44) {
       // Header-only WAV: no audio was captured; do not round-trip the API.
       setError("No audio captured - check your microphone and try again");
-      setPhase("ran");
+      goPhase("ran");
       return;
     }
-    setPhase("ranScoring");
+    goPhase("ranScoring");
     setRanBusy(true);
     try {
       const form = new FormData();
@@ -233,7 +270,7 @@ export default function SessionClient(props: {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setRanBusy(false);
-      setPhase("ranResult");
+      goPhase("ranResult");
     }
   }, [slug, stopCapture]);
 
@@ -322,18 +359,43 @@ export default function SessionClient(props: {
           <PassageCard passage={passage} />
           <button
             type="button"
-            onClick={startReading}
+            onClick={startSession}
             className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
           >
-            Start Reading
+            Start session
           </button>
+        </section>
+      )}
+
+      {phase === "greeting" && (
+        <section className="rounded-lg border p-6 space-y-4">
+          <PassageCard passage={passage} />
+          <p className="text-sm text-gray-500" data-testid="greeting-hint">
+            Listen to ReadPulse, then read the passage aloud.
+          </p>
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <span
+              className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600"
+              aria-hidden="true"
+            />
+            Listening...
+          </div>
+          <div>
+            <button
+              type="button"
+              onClick={skipGreeting}
+              className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+            >
+              Skip greeting and read now
+            </button>
+          </div>
         </section>
       )}
 
       {phase === "reading" && (
         <section className="rounded-lg border p-6 space-y-4">
           <p className="text-sm text-gray-500">
-            Time left: <span data-testid="countdown">{countdown}</span>s
+            Time left: <span data-testid="countdown">{countdown ?? 60}</span>s
           </p>
           <PassageCard passage={passage} />
           <button
@@ -368,7 +430,7 @@ export default function SessionClient(props: {
               onClick={() => {
                 setPracticeIndex(0);
                 setPracticed([]);
-                setPhase("practice");
+                goPhase("practice");
               }}
               className="rounded border px-4 py-2 hover:bg-gray-50"
             >
@@ -376,14 +438,14 @@ export default function SessionClient(props: {
             </button>
             <button
               type="button"
-              onClick={() => setPhase("ran")}
+              onClick={() => goPhase("ran")}
               className="rounded border px-4 py-2 hover:bg-gray-50"
             >
               Try the naming game
             </button>
             <button
               type="button"
-              onClick={() => setPhase("done")}
+              onClick={() => goPhase("done")}
               className="rounded border px-4 py-2 hover:bg-gray-50"
             >
               Finish and get report link
@@ -407,7 +469,7 @@ export default function SessionClient(props: {
           <div>
             <button
               type="button"
-              onClick={() => setPhase("result")}
+              onClick={() => goPhase("result")}
               className="text-sm text-gray-500 underline hover:text-gray-700"
             >
               Back
@@ -462,7 +524,7 @@ export default function SessionClient(props: {
               <p className="text-gray-600">Great work - rereading words out loud makes them stick!</p>
               <button
                 type="button"
-                onClick={() => setPhase("result")}
+                onClick={() => goPhase("result")}
                 className="rounded border px-4 py-2 hover:bg-gray-50"
               >
                 Back
@@ -536,7 +598,7 @@ export default function SessionClient(props: {
           )}
           <button
             type="button"
-            onClick={() => setPhase("result")}
+            onClick={() => goPhase("result")}
             className="rounded border px-4 py-2 hover:bg-gray-50"
           >
             Back

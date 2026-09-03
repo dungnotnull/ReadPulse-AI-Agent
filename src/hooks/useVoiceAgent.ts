@@ -66,12 +66,19 @@ export function useVoiceAgent() {
   const pendingToolResults = useRef(new Map<string, string>());
   const playbackQueue = useRef<Float32Array[]>([]);
   const playingRef = useRef(false);
+  const resumeOnceRef = useRef<(() => void) | null>(null);
   const connectEpochRef = useRef(0);
   const sendBufferRef = useRef<Int16Array[]>([]);
   const sendBufferSamplesRef = useRef(0);
 
   const send = useCallback((msg: unknown) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(msg));
+  }, []);
+
+  // Chrome autoplay policy keeps a context created without a user gesture suspended;
+  // resuming from a real click unblocks all queued reply.audio playback.
+  const resumeAudio = useCallback(() => {
+    ctxRef.current?.resume().catch(() => undefined);
   }, []);
 
   // Tool results are buffered on tool.call and only flushed after reply.done;
@@ -93,8 +100,13 @@ export function useVoiceAgent() {
   // Sequential playback: queue PCM chunks into AudioContext buffers, never sleep-schedule.
   const playQueue = useCallback(async () => {
     if (playingRef.current) return;
+    if (ctxRef.current?.state !== "running") {
+      // Suspended context: keep the queue, a later resume + reply.audio retries playback.
+      playingRef.current = false;
+      return;
+    }
     playingRef.current = true;
-    while (playbackQueue.current.length > 0 && ctxRef.current) {
+    while (playbackQueue.current.length > 0 && ctxRef.current?.state === "running") {
       const f32 = playbackQueue.current.shift()!;
       const buf = ctxRef.current.createBuffer(1, f32.length, ctxRef.current.sampleRate);
       buf.copyToChannel(new Float32Array(f32), 0);
@@ -121,6 +133,10 @@ export function useVoiceAgent() {
     }
     nodeRef.current?.disconnect();
     streamRef.current?.getTracks().forEach((t) => t.stop());
+    if (resumeOnceRef.current) {
+      document.removeEventListener("pointerdown", resumeOnceRef.current);
+      resumeOnceRef.current = null;
+    }
     void ctxRef.current?.close().catch(() => undefined);
     setConnected(false);
   }, []);
@@ -245,6 +261,14 @@ export function useVoiceAgent() {
         return;
       }
       ctxRef.current = ctx;
+      // Autoplay policy: try to resume immediately, and fall back to the first
+      // user gesture in case this connect() ran without one (initial mount).
+      void ctx.resume().catch(() => undefined);
+      const resumeOnce = () => {
+        ctxRef.current?.resume().catch(() => undefined);
+      };
+      resumeOnceRef.current = resumeOnce;
+      document.addEventListener("pointerdown", resumeOnce, { once: true });
       const src = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, "pcm-worklet");
       nodeRef.current = node;
@@ -300,5 +324,5 @@ export function useVoiceAgent() {
 
   useEffect(() => () => disconnect(), [disconnect]);
 
-  return { connected, connect, disconnect, send, startCapture, stopCapture };
+  return { connected, connect, disconnect, send, startCapture, stopCapture, resumeAudio };
 }
