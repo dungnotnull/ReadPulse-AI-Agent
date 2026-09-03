@@ -1125,7 +1125,7 @@ import { createVoiceAgentToken, transcribeAudio } from "./assemblyai";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("createVoiceAgentToken", () => {
-  it("POSTs the token endpoint with auth header and returns token string", async () => {
+  it("GETs the agents token endpoint with Bearer auth and returns the token", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ token: "tok_123" }), { status: 200 })
     );
@@ -1133,40 +1133,30 @@ describe("createVoiceAgentToken", () => {
     const token = await createVoiceAgentToken();
     expect(token).toBe("tok_123");
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toContain("/token");
-    expect((init.headers as Record<string, string>).authorization).toContain(process.env.AAI_API_KEY ?? "");
+    expect(String(url)).toBe("https://agents.assemblyai.com/v1/token?expires_in_seconds=480");
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${process.env.AAI_API_KEY}`);
   });
 });
 
 describe("transcribeAudio", () => {
-  it("uploads, creates transcript with universal model, polls until completed, maps words", async () => {
-    let call = 0;
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      call++;
-      if (String(url).endsWith("/v2/upload")) {
-        return Promise.resolve(new Response(JSON.stringify({ upload_url: "https://up/1" })));
-      }
-      if (String(url).endsWith("/v2/transcript") && call === 2) {
-        return Promise.resolve(new Response(JSON.stringify({ id: "tr1" }), { status: 200 }));
-      }
-      // polling GET
-      return Promise.resolve(new Response(JSON.stringify({
-        status: call === 3 ? "processing" : "completed",
+  it("POSTs multipart to the sync API with X-AAI-Model and maps words", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        text: "Hello",
         words: [{ text: "Hello", start: 100, end: 400, confidence: 0.99 }],
-      })));
-    });
+      }), { status: 200 })
+    );
     vi.stubGlobal("fetch", fetchMock);
     const words = await transcribeAudio(new Blob(["x"]));
     expect(words).toEqual([{ text: "Hello", start_ms: 100, end_ms: 400, confidence: 0.99 }]);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.assemblyai.com/v2/transcript",
-      expect.objectContaining({ method: "POST" })
-    );
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("https://sync.assemblyai.com/transcribe");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>)["X-AAI-Model"]).toBe("universal-3-5-pro");
+    expect((init.headers as Record<string, string>).Authorization).toBe(process.env.AAI_API_KEY);
   });
 });
 ```
-
-(Import from `"vitest"` — fix the typo above when writing the file.)
 
 - [ ] **Step 2: Run** — FAIL.
 - [ ] **Step 3: Implement** (use the endpoint verified in Task 0 Step 5)
@@ -1180,48 +1170,44 @@ const KEY = () => {
   return k;
 };
 
-// Endpoint confirmed in Task 0 verification (candidate:
-// https://api.assemblyai.com/v1/realtime/token). Adjust ONLY per Task 0 result.
+// VERIFIED endpoints — see docs/superpowers/specs/assemblyai-voice-agent-facts.md
+// Voice Agent API requires the Bearer prefix (unique among AssemblyAI products).
 export async function createVoiceAgentToken(expiresInSeconds = 480): Promise<string> {
-  const res = await fetch("https://api.assemblyai.com/v1/realtime/token", {
-    method: "POST",
-    headers: { authorization: KEY(), "content-type": "application/json" },
-    body: JSON.stringify({ expires_in_seconds: expiresInSeconds }),
-  });
+  const res = await fetch(
+    `https://agents.assemblyai.com/v1/token?expires_in_seconds=${expiresInSeconds}`,
+    { headers: { Authorization: `Bearer ${KEY()}` } }
+  );
   if (!res.ok) throw new Error(`token failed: ${res.status}`);
-  const data = (await res.json()) as { token?: string; data?: { token: string } };
-  return data.token ?? data.data!.token;
+  const data = (await res.json()) as { token: string };
+  return data.token;
 }
 
-interface BatchWord { text: string; start: number; end: number; confidence: number }
-interface BatchTranscript {
-  id: string; status: "queued" | "processing" | "completed" | "error";
-  words?: BatchWord[]; error?: string;
+interface SyncWord { text: string; start: number; end: number; confidence: number }
+interface SyncResponse {
+  text: string;
+  words?: SyncWord[];
+  error?: unknown;
 }
 
+// Sync API: single round trip for our <=60s clips (limits 80ms-120s, <=40MB, WAV ok).
 export async function transcribeAudio(audio: Blob): Promise<SttWord[]> {
-  const headers = { authorization: KEY() };
-  const up = await fetch("https://api.assemblyai.com/v2/upload", {
-    method: "POST", headers, body: audio,
-  });
-  if (!up.ok) throw new Error(`upload failed: ${up.status}`);
-  const { upload_url } = (await up.json()) as { upload_url: string };
-
-  const created = await fetch("https://api.assemblyai.com/v2/transcript", {
+  const fd = new FormData();
+  fd.append("audio", audio, "reading.wav");
+  fd.append(
+    "config",
+    new Blob([JSON.stringify({ language_code: "en" })], { type: "application/json" })
+  );
+  const res = await fetch("https://sync.assemblyai.com/transcribe", {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify({ audio_url: upload_url, speech_model: "universal" }),
+    headers: {
+      Authorization: KEY(), // raw key, NO Bearer for STT products
+      "X-AAI-Model": "universal-3-5-pro",
+    },
+    body: fd,
   });
-  if (!created.ok) throw new Error(`transcript create failed: ${created.status}`);
-  let t = (await created.json()) as BatchTranscript;
-
-  while (t.status === "queued" || t.status === "processing") {
-    await new Promise((r) => setTimeout(r, 1000));
-    const poll = await fetch(`https://api.assemblyai.com/v2/transcript/${t.id}`, { headers });
-    t = (await poll.json()) as BatchTranscript;
-  }
-  if (t.status === "error") throw new Error(`transcript error: ${t.error}`);
-  return (t.words ?? []).map((w) => ({
+  if (!res.ok) throw new Error(`sync transcription failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as SyncResponse;
+  return (data.words ?? []).map((w) => ({
     text: w.text, start_ms: w.start, end_ms: w.end, confidence: w.confidence,
   }));
 }
@@ -1506,8 +1492,9 @@ export interface ToolSpec {
 }
 
 export interface VoiceAgentConfig {
-  instructions: string;
-  voice?: string;
+  instructions: string; // becomes session.system_prompt (flat schema)
+  greeting?: string; // optional spoken greeting right after session.ready
+  voice?: string; // exact voice name, e.g. "anna" (default)
   tools?: ToolSpec[];
   onUserTranscript?: (text: string, isFinal: boolean) => void;
   onSpeechStarted?: () => void;
@@ -1551,6 +1538,8 @@ export function useVoiceAgent() {
   const captureRef = useRef<Int16Array[]>([]); // tee buffer
   const capturingRef = useRef(false);
   const cfgRef = useRef<VoiceAgentConfig | null>(null);
+  const readyRef = useRef(false); // true after session.ready
+  const pendingToolResults = useRef(new Map<string, string>()); // call_id -> JSON result
   const playbackQueue = useRef<Float32Array[]>([]);
   const playingRef = useRef(false);
 
@@ -1580,26 +1569,25 @@ export function useVoiceAgent() {
     const ws = new WebSocket(`wss://agents.assemblyai.com/v1/ws?token=${token}`);
     wsRef.current = ws;
     ws.onopen = () => {
+      // Flat session schema, per docs/superpowers/specs/assemblyai-voice-agent-facts.md.
+      // session.update is sent immediately on open; audio flows only after session.ready.
       send({
         type: "session.update",
         session: {
-          agent: {
-            instructions: cfg.instructions,
-            // Voice: pick a concrete voice id from the official voice catalog
-            // (docs > Voice Agent API > voices) during Task 12 manual check.
-            // Omitted here on purpose so the API default applies instead of a
-            // fabricated id.
-            ...(cfg.voice ? { voice: cfg.voice } : {}),
-            tools: cfg.tools ?? [],
-          },
-          input: { format: { encoding: "audio/pcm", sample_rate: 24000 } },
+          system_prompt: cfg.instructions,
+          ...(cfg.greeting ? { greeting: cfg.greeting } : {}),
+          input: { format: { encoding: "audio/pcm" } },
+          output: { voice: cfg.voice ?? "anna", format: { encoding: "audio/pcm" } },
+          tools: (cfg.tools ?? []).map((t) => ({
+            type: "function", name: t.name, description: t.description, parameters: t.parameters,
+          })),
         },
       });
     };
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data as string);
       switch (msg.type) {
-        case "session.ready": setConnected(true); cfg.onStatus?.("ready"); break;
+        case "session.ready": readyRef.current = true; setConnected(true); cfg.onStatus?.("ready"); break;
         case "session.error": case "error": cfg.onStatus?.(`error: ${msg.message}`); break;
         case "transcript.user.delta": cfg.onUserTranscript?.(msg.text, false); break;
         case "transcript.user": cfg.onUserTranscript?.(msg.text, true); break;
@@ -1614,7 +1602,10 @@ export function useVoiceAgent() {
           void playQueue();
           break;
         }
-        case "reply.done": cfg.onStatus?.("reply.done"); break;
+        case "reply.done":
+          cfg.onStatus?.("reply.done");
+          flushToolResults(msg.status === "interrupted");
+          break;
         case "tool.call": void handleToolCall(msg); break;
       }
     };
@@ -1628,25 +1619,35 @@ export function useVoiceAgent() {
     const node = new AudioWorkletNode(ctx, "pcm-worklet");
     nodeRef.current = node;
     node.port.onmessage = (e) => {
+      // Per docs: audio flows only after session.ready (readyRef gate).
+      if (!readyRef.current) return;
       const f32 = e.data as Float32Array;
-      // convert once, use for both WS and capture
       const i16 = new Int16Array(f32.length);
       for (let k = 0; k < f32.length; k++) {
         const s = Math.max(-1, Math.min(1, f32[k]));
         i16[k] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
       if (capturingRef.current) captureRef.current.push(i16);
-      send({ type: "input.audio", data: btoa(String.fromCharCode(...new Uint8Array(i16.buffer))) });
+      // Field name is `audio` on input (reply side uses `data` — see factsheet).
+      send({ type: "input.audio", audio: btoa(String.fromCharCode(...new Uint8Array(i16.buffer))) });
     };
     src.connect(node);
   }, [playQueue, send]);
 
   const handleToolCall = useCallback(async (msg: { call_id: string; name: string; arguments: string }) => {
-    // Per docs: send tool.result inside reply.done flow; executing async then sending is acceptable
-    // for hold-mode tools. See Task 0 docs URL for the exact contract.
+    // Per docs: execute now, but send tool.result only AFTER reply.done fires
+    // (and discard if that reply.done is "interrupted" — see flushToolResults).
     const args = msg.arguments ? JSON.parse(msg.arguments) : {};
     const result = await cfgRef.current?.onToolCall?.(msg.name, args);
-    send({ type: "tool.result", call_id: msg.call_id, result: JSON.stringify(result ?? { ok: true }) });
+    pendingToolResults.current.set(msg.call_id, JSON.stringify(result ?? { ok: true }));
+  }, []);
+
+  const flushToolResults = useCallback((discard: boolean) => {
+    if (discard) { pendingToolResults.current.clear(); return; }
+    for (const [callId, result] of pendingToolResults.current) {
+      send({ type: "tool.result", call_id: callId, result });
+    }
+    pendingToolResults.current.clear();
   }, [send]);
 
   const startCapture = useCallback(() => { capturingRef.current = true; }, []);
