@@ -28,4 +28,16 @@ describe("normalizeToTokens", () => {
   it("collapses whitespace and drops empties", () => {
     expect(normalizeToTokens("  a   b  ")).toHaveLength(2);
   });
+  it("splits interior punctuation into separate tokens", () => {
+    expect(normalizeToTokens("hello...world")).toEqual([
+      { norm: "hello", original: "hello...world" },
+      { norm: "world", original: "hello...world" },
+    ]);
+  });
+  it("splits chained hyphenated segments", () => {
+    expect(normalizeToTokens("a-b-c").map((t) => t.norm)).toEqual(["a", "b", "c"]);
+  });
+  it("strips edge apostrophes but keeps internal ones", () => {
+    expect(normalizeToTokens("’tis it’s").map((t) => t.norm)).toEqual(["tis", "it's"]);
+  });
 });
