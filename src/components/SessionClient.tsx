@@ -6,6 +6,7 @@ import ReportView from "@/components/ReportView";
 import PassageCard from "@/components/PassageCard";
 import RanGrid from "@/components/RanGrid";
 import type { RanScore, ReadingScore } from "@/lib/scoring/types";
+import { normalizeToTokens } from "@/lib/scoring/normalizer";
 
 // Exact protocol prompt; do not paraphrase (scientific protocol requirement).
 function buildInstructions(childName: string, grade: number, title: string): string {
@@ -68,7 +69,10 @@ export default function SessionClient(props: {
             parameters: { ...EMPTY_TOOL_PARAMS },
           },
         ],
-        onUserTranscript: (text: string) => setTranscript(text),
+        onUserTranscript: (text: string, isFinal: boolean) => {
+          setTranscript(text);
+          if (isFinal) setFinalTranscript(text);
+        },
         onStatus: (s: string) => setStatusLine(s),
         onToolCall: async (name: string) => {
           if (name === "score_reading") {
@@ -101,6 +105,9 @@ export default function SessionClient(props: {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [ranBusy, setRanBusy] = useState(false);
+  const [practiceIndex, setPracticeIndex] = useState(0);
+  const [practiced, setPracticed] = useState<string[]>([]);
+  const [finalTranscript, setFinalTranscript] = useState("");
 
   const scoreRef = useRef<ReadingScore | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -228,6 +235,49 @@ export default function SessionClient(props: {
     });
   }, [shareLink]);
 
+  // Guided repeated oral reading is the evidence-based fluency intervention
+  // (National Reading Panel 2000; Samuels 1979; Therrien 2004). Drill only words
+  // with an expected form (substitution/omission); dedup by normalized expected word.
+  const drillWords = useMemo(() => {
+    if (!score) return [];
+    const seen = new Set<string>();
+    return score.missedWords.filter((w) => {
+      if (w.type !== "substitution" && w.type !== "omission") return false;
+      const key = normalizeToTokens(w.expected)
+        .map((t) => t.norm)
+        .join(" ");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [score]);
+
+  const markPracticed = useCallback(() => {
+    const word = drillWords[practiceIndex];
+    if (!word) return;
+    setPracticed((prev) => [...prev, word.expected]);
+    setPracticeIndex((i) => i + 1);
+  }, [drillWords, practiceIndex]);
+
+  const skipWord = useCallback(() => {
+    setPracticeIndex((i) => i + 1);
+  }, []);
+
+  // Auto-detect: when a final user transcript contains the current drill word
+  // (normalized token membership), mark it practiced and advance. Consuming the
+  // transcript prevents re-triggering on the same utterance.
+  useEffect(() => {
+    if (phase !== "practice" || !finalTranscript) return;
+    const word = drillWords[practiceIndex];
+    if (!word) return;
+    const targetTokens = normalizeToTokens(word.expected).map((t) => t.norm);
+    const heard = new Set(normalizeToTokens(finalTranscript).map((t) => t.norm));
+    if (targetTokens.length > 0 && targetTokens.every((t) => heard.has(t))) {
+      setFinalTranscript("");
+      markPracticed();
+    }
+  }, [phase, finalTranscript, drillWords, practiceIndex, markPracticed]);
+
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-4">
       <header className="flex items-baseline justify-between">
@@ -291,7 +341,11 @@ export default function SessionClient(props: {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setPhase("practice")}
+              onClick={() => {
+                setPracticeIndex(0);
+                setPracticed([]);
+                setPhase("practice");
+              }}
               className="rounded border px-4 py-2 hover:bg-gray-50"
             >
               Practice words
@@ -326,26 +380,72 @@ export default function SessionClient(props: {
 
       {phase === "practice" && (
         <section className="rounded-lg border p-6 space-y-4">
-          <h2 className="text-lg font-semibold">Words to practice</h2>
-          {score && score.missedWords.length > 0 ? (
-            <ul className="list-disc list-inside text-lg">
-              {score.missedWords.map((w, i) => (
-                <li key={i}>
-                  {w.expected}
-                  {w.got ? ` (you said: ${w.got})` : ""}
-                </li>
-              ))}
-            </ul>
-          ) : (
+          <div>
+            <button
+              type="button"
+              onClick={() => setPhase("result")}
+              className="text-sm text-gray-500 underline hover:text-gray-700"
+            >
+              Back
+            </button>
+          </div>
+          {drillWords.length === 0 ? (
             <p className="text-gray-600">No missed words - great reading!</p>
+          ) : practiceIndex < drillWords.length ? (
+            <>
+              <h2 className="text-lg font-semibold">Echo practice</h2>
+              <p className="text-sm text-gray-500" data-testid="practice-progress">
+                Word {practiceIndex + 1} of {drillWords.length} - Practiced {practiced.length}
+              </p>
+              <p className="text-5xl font-bold text-center py-6" data-testid="drill-word">
+                {drillWords[practiceIndex].expected}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled
+                  title="Agent speech triggering is not supported by the voice API; ask a parent or teacher to say the word aloud."
+                  className="rounded border px-4 py-2 text-gray-400 cursor-not-allowed"
+                >
+                  Ask ReadPulse to say it
+                </button>
+                <button
+                  type="button"
+                  onClick={markPracticed}
+                  data-testid="mark-practiced"
+                  className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+                >
+                  Mark as practiced
+                </button>
+                <button
+                  type="button"
+                  onClick={skipWord}
+                  data-testid="skip-word"
+                  className="rounded border px-4 py-2 hover:bg-gray-50"
+                >
+                  Skip
+                </button>
+              </div>
+              <p className="text-xs text-gray-500">
+                Say the word out loud after your coach - or a grown-up - says it. ReadPulse
+                listens and marks it practiced automatically.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-lg font-semibold" data-testid="practice-complete">
+                Practice complete! Practiced {practiced.length} of {drillWords.length} words.
+              </h2>
+              <p className="text-gray-600">Great work - rereading words out loud makes them stick!</p>
+              <button
+                type="button"
+                onClick={() => setPhase("result")}
+                className="rounded border px-4 py-2 hover:bg-gray-50"
+              >
+                Back
+              </button>
+            </>
           )}
-          <button
-            type="button"
-            onClick={() => setPhase("result")}
-            className="rounded border px-4 py-2 hover:bg-gray-50"
-          >
-            Back
-          </button>
         </section>
       )}
 
