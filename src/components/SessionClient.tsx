@@ -140,6 +140,14 @@ export default function SessionClient(props: {
       }
       const wav = stopCapture();
       setCountdown(null);
+      if (wav.size <= 44) {
+        // Header-only WAV: no audio was captured; do not round-trip the API.
+        setError("No audio captured - check your microphone and try again");
+        setScore(null);
+        setPhase("result");
+        submittingRef.current = false;
+        return;
+      }
       setPhase("scoring");
       const form = new FormData();
       form.append("audio", new File([wav], "reading.wav", { type: "audio/wav" }));
@@ -191,6 +199,12 @@ export default function SessionClient(props: {
 
   const finishRan = useCallback(async () => {
     const wav = stopCapture();
+    if (wav.size <= 44) {
+      // Header-only WAV: no audio was captured; do not round-trip the API.
+      setError("No audio captured - check your microphone and try again");
+      setPhase("ran");
+      return;
+    }
     setPhase("ranScoring");
     setRanBusy(true);
     try {

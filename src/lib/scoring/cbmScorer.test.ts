@@ -114,4 +114,21 @@ describe("scoreReading", () => {
     expect(s.counts.correct).toBe(4); // 4 normalized tokens matched ("well-known" -> 2 tokens)
     expect(s.missedWords).toHaveLength(0);
   });
+
+  it("early finisher: words not reached are not attempted, not omissions", () => {
+    // read the first 6 words perfectly then stop
+    const words = passage.map((p) => p.word).slice(0, 6);
+    const s = scoreReading({ passage, transcript: synth(words), grade: 3, season: "spring" });
+    expect(s.counts.correct).toBe(6);
+    expect(s.counts.omissions).toBe(0);
+    expect(s.accuracyPct).toBe(100);
+    expect(s.missedWords).toHaveLength(0);
+  });
+
+  it("interior omission still counts when later words are read", () => {
+    const words = passage.map((p) => p.word).filter((_, i) => i !== 3); // skip "sat"
+    const s = scoreReading({ passage, transcript: synth(words), grade: 3, season: "spring" });
+    expect(s.counts.omissions).toBe(1); // the skipped interior word
+    expect(s.counts.correct).toBe(13);
+  });
 });

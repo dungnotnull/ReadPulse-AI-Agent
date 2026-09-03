@@ -8,7 +8,11 @@ const KEY = () => {
 
 // VERIFIED endpoints — see docs/superpowers/specs/assemblyai-voice-agent-facts.md
 // The Voice Agent API requires the Bearer prefix (unique among AssemblyAI products).
-export async function createVoiceAgentToken(expiresInSeconds = 480): Promise<string> {
+// Per the API docs, expires_in_seconds (max 600) is the token REDEMPTION window
+// (mint -> connect); the session itself runs up to max_session_duration_seconds
+// (default 3h). Using the max removes any connect-delay risk; mid-session
+// expiry is not a concern.
+export async function createVoiceAgentToken(expiresInSeconds = 600): Promise<string> {
   const res = await fetch(
     `https://agents.assemblyai.com/v1/token?expires_in_seconds=${expiresInSeconds}`,
     { headers: { Authorization: `Bearer ${KEY()}` } }

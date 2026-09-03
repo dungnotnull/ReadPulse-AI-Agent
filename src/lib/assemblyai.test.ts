@@ -13,7 +13,7 @@ describe("createVoiceAgentToken", () => {
     const token = await createVoiceAgentToken();
     expect(token).toBe("tok_123");
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toBe("https://agents.assemblyai.com/v1/token?expires_in_seconds=480");
+    expect(String(url)).toBe("https://agents.assemblyai.com/v1/token?expires_in_seconds=600");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer test_key_123");
   });
 });

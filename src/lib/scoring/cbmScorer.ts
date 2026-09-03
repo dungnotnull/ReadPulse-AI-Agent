@@ -96,10 +96,22 @@ export function scoreReading(input: ScoreInput): ReadingScore {
   const missedWords: MissedWord[] = [];
   const lowConfidenceWords: Array<{ word: string; confidence: number }> = [];
   let lastEndMs = onsetMs;
+  // Last passage index (token space) reached by any timed op in the window,
+  // precomputed since ops arrive in passage order. CBM convention: words not
+  // reached at the stop point are "not attempted", not omissions — the child
+  // simply stopped before them.
+  let lastAttemptedIdx: number | null = null;
+  for (const { op } of collapsed) {
+    if (op.transcriptIndex !== null && op.passageIndex !== null && inWindow(op.end_ms)) {
+      lastAttemptedIdx = Math.max(lastAttemptedIdx ?? -1, op.passageIndex);
+    }
+  }
 
   for (const { op, selfCorrected } of collapsed) {
     const timed = op.transcriptIndex !== null;
     if (timed && !inWindow(op.end_ms)) continue;
+    // Trailing omissions beyond the last attempted word were never reached.
+    if (op.op === "omission" && (lastAttemptedIdx === null || op.passageIndex! > lastAttemptedIdx)) continue;
     // Hesitation is recorded IN ADDITION TO the word's own error classification
     // (fluency event + accuracy event), by design per DIBELS fluency/accuracy separation.
     if (timed && op.start_ms - lastEndMs > HESITATION_GAP_MS && op.op !== "insertion") {

@@ -100,6 +100,9 @@ ReadPulse's adaptation and its disclosures:
 - **Screen-based administration is an adaptation**: standard RAN is
   examiner-administered with printed cards. Screen presentation is disclosed
   as a departure from the standard protocol.
+- The shipped session flow administers the color variant; the object variant
+  is supported by the data model and scoring API but not exposed in the
+  session UI.
 
 ## 5. ASR limitation and mitigations
 

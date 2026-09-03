@@ -21,8 +21,9 @@ scoring engine. Every rule, threshold, and citation is public in
 
 ## How it works
 
-1. The agent greets the child and collects first name, grade (1-6), and
-   season (fall/winter/spring).
+1. The setup web form collects the child's first name, grade (1-6), and
+   season (fall/winter/spring); the agent greets the child by name and leads
+   the session.
 2. The child reads a leveled passage aloud; the agent stays silent while the
    client captures the audio.
 3. After 60 seconds of reading (or when the child finishes), the agent gives
