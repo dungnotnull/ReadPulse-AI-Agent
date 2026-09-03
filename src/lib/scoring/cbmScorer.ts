@@ -20,6 +20,10 @@ interface ScoreInput {
 // ("well-known" -> 2), so alignment indexes over the normalized sequence do
 // not correspond to source indexes. Build an explicit token -> source index
 // map by normalizing each source word independently.
+// Counting note: manual CBM counts a hyphenated word as ONE correct word; this
+// engine scores normalized tokens, so "well-known" read correctly counts as two.
+// Shipped passages contain no hyphenated words, so WCPM is unaffected; documented
+// in METHODOLOGY.md as an implementation deviation.
 function mapTokensToSources<T>(sources: string[]): { norms: string[]; sourceOf: number[] } {
   const norms: string[] = [];
   const sourceOf: number[] = [];
@@ -84,6 +88,9 @@ export function scoreReading(input: ScoreInput): ReadingScore {
     collapsed.push({ op: cur, selfCorrected: false });
   }
 
+  const sentenceIndexFor = (op: AlignmentOp): number =>
+    op.passageIndex !== null ? input.passage[passage.sourceOf[op.passageIndex]].sentenceIndex : 0;
+
   const inWindow = (endMs: number) => endMs <= windowEndMs;
   const counts = { correct: 0, substitutions: 0, omissions: 0, insertions: 0, hesitations: 0, selfCorrections: 0 };
   const missedWords: MissedWord[] = [];
@@ -93,10 +100,11 @@ export function scoreReading(input: ScoreInput): ReadingScore {
   for (const { op, selfCorrected } of collapsed) {
     const timed = op.transcriptIndex !== null;
     if (timed && !inWindow(op.end_ms)) continue;
+    // Hesitation is recorded IN ADDITION TO the word's own error classification
+    // (fluency event + accuracy event), by design per DIBELS fluency/accuracy separation.
     if (timed && op.start_ms - lastEndMs > HESITATION_GAP_MS && op.op !== "insertion") {
       counts.hesitations++;
-      const si = op.passageIndex !== null ? input.passage[passage.sourceOf[op.passageIndex]].sentenceIndex : 0;
-      missedWords.push({ expected: op.expected ?? "", got: null, type: "hesitation", sentenceIndex: si });
+      missedWords.push({ expected: op.expected ?? "", got: null, type: "hesitation", sentenceIndex: sentenceIndexFor(op) });
     }
     if (timed) lastEndMs = op.end_ms;
     if (selfCorrected) {
@@ -105,22 +113,24 @@ export function scoreReading(input: ScoreInput): ReadingScore {
       continue;
     }
     switch (op.op) {
-      case "match":
+      case "match": {
         counts.correct++;
-        if (input.transcript[spoken.sourceOf[op.transcriptIndex!]].confidence < LOW_CONFIDENCE) {
+        const sttWord = input.transcript[spoken.sourceOf[op.transcriptIndex!]];
+        if (sttWord.confidence < LOW_CONFIDENCE) {
           lowConfidenceWords.push({
             word: op.expected ?? "",
-            confidence: input.transcript[spoken.sourceOf[op.transcriptIndex!]].confidence,
+            confidence: sttWord.confidence,
           });
         }
         break;
+      }
       case "substitution":
         counts.substitutions++;
         missedWords.push({
           expected: op.expected ?? "",
           got: op.got,
           type: "substitution",
-          sentenceIndex: op.passageIndex !== null ? input.passage[passage.sourceOf[op.passageIndex]].sentenceIndex : 0,
+          sentenceIndex: sentenceIndexFor(op),
         });
         break;
       case "omission":
@@ -129,7 +139,7 @@ export function scoreReading(input: ScoreInput): ReadingScore {
           expected: op.expected ?? "",
           got: null,
           type: "omission",
-          sentenceIndex: op.passageIndex !== null ? input.passage[passage.sourceOf[op.passageIndex]].sentenceIndex : 0,
+          sentenceIndex: sentenceIndexFor(op),
         });
         break;
       case "insertion":

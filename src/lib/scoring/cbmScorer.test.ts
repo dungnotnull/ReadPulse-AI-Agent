@@ -80,14 +80,20 @@ describe("scoreReading", () => {
     expect(s.missedWords.find((m) => m.type === "hesitation")?.expected).toBe("sat");
   });
 
-  it("60s window: words read after window end are excluded from WCPM", () => {
+  it("window excludes words read after the window end (custom 8s window)", () => {
+    // Arithmetic: synth slot k has start = 1000 + k*300; test adds k*5000, so
+    // start = 1000 + k*5300, end = start + 200.
+    //   k=0: 1000..1200; k=1: 6300..6500; k=2: 11600..11800; ...
+    // Onset = end of word 0 = 1200ms; windowMs = 8000 -> window end = 9200ms.
+    // In window (end_ms <= 9200): k=0 and k=1 only -> 2 correct.
+    // Elapsed clamps to last in-window end: 6500 - 1200 = 5300ms = 5.3s.
     const words = passage.map((p) => p.word);
     const transcript = synth(words).map((w, k) => ({
       ...w, start_ms: w.start_ms + k * 5000, end_ms: w.end_ms + k * 5000,
     }));
-    const s = scoreReading({ passage, transcript, grade: 3, season: "spring", windowMs: 60000 });
-    expect(s.windowSeconds).toBeLessThanOrEqual(60);
-    expect(s.counts.correct).toBeLessThan(14);
+    const s = scoreReading({ passage, transcript, grade: 3, season: "spring", windowMs: 8000 });
+    expect(s.counts.correct).toBe(2);
+    expect(s.windowSeconds).toBeCloseTo((6500 - 1200) / 1000, 1);
   });
 
   it("flags low-confidence matches as review items (operational 0.80)", () => {
@@ -95,5 +101,17 @@ describe("scoreReading", () => {
     transcript[2].confidence = 0.4;
     const s = scoreReading({ passage, transcript, grade: 3, season: "spring" });
     expect(s.lowConfidenceWords).toEqual([{ word: "cat", confidence: 0.4 }]);
+  });
+
+  it("multi-token passage word maps both matches to one source word (token counting documented)", () => {
+    const passageMulti: PassageWord[] = [
+      { word: "The", sentenceIndex: 0 },
+      { word: "well-known", sentenceIndex: 0 },
+      { word: "dog", sentenceIndex: 0 },
+    ];
+    const transcript = synth(["The", "well", "known", "dog"]);
+    const s = scoreReading({ passage: passageMulti, transcript, grade: 3, season: "spring" });
+    expect(s.counts.correct).toBe(4); // 4 normalized tokens matched ("well-known" -> 2 tokens)
+    expect(s.missedWords).toHaveLength(0);
   });
 });
