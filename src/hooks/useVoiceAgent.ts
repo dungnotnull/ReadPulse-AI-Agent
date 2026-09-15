@@ -65,7 +65,10 @@ export function useVoiceAgent() {
   const readyRef = useRef(false);
   const pendingToolResults = useRef(new Map<string, string>());
   const playbackQueue = useRef<Float32Array[]>([]);
-  const playingRef = useRef(false);
+  // Running playback cursor (AudioContext time) for gapless chunk scheduling,
+  // plus the set of already-scheduled sources so barge-in can stop them.
+  const nextTimeRef = useRef(0);
+  const activeSourcesRef = useRef(new Set<AudioBufferSourceNode>());
   const resumeOnceRef = useRef<(() => void) | null>(null);
   const connectEpochRef = useRef(0);
   const sendBufferRef = useRef<Int16Array[]>([]);
@@ -97,28 +100,29 @@ export function useVoiceAgent() {
     [send],
   );
 
-  // Sequential playback: queue PCM chunks into AudioContext buffers, never sleep-schedule.
-  const playQueue = useCallback(async () => {
-    if (playingRef.current) return;
-    if (ctxRef.current?.state !== "running") {
-      // Suspended context: keep the queue, a later resume + reply.audio retries playback.
-      playingRef.current = false;
-      return;
-    }
-    playingRef.current = true;
-    while (playbackQueue.current.length > 0 && ctxRef.current?.state === "running") {
+  // Gapless playback: schedule every chunk back-to-back on a running time cursor.
+  // Awaiting each buffer's onended instead inserts an event-loop gap at every
+  // chunk boundary - periodic clicks that smear the agent's speech.
+  const playQueue = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx || ctx.state !== "running") return; // suspended: keep queue, a later reply.audio retries
+    let nextTime = nextTimeRef.current;
+    while (playbackQueue.current.length > 0) {
       const f32 = playbackQueue.current.shift()!;
-      const buf = ctxRef.current.createBuffer(1, f32.length, ctxRef.current.sampleRate);
+      const buf = ctx.createBuffer(1, f32.length, ctx.sampleRate);
       buf.copyToChannel(new Float32Array(f32), 0);
-      const src = ctxRef.current.createBufferSource();
+      const src = ctx.createBufferSource();
       src.buffer = buf;
-      src.connect(ctxRef.current.destination);
-      src.start();
-      await new Promise((r) => {
-        src.onended = r;
-      });
+      src.connect(ctx.destination);
+      const startAt = Math.max(ctx.currentTime + 0.03, nextTime);
+      src.start(startAt);
+      activeSourcesRef.current.add(src);
+      src.onended = () => {
+        activeSourcesRef.current.delete(src);
+      };
+      nextTime = startAt + buf.duration;
     }
-    playingRef.current = false;
+    nextTimeRef.current = nextTime;
   }, []);
 
   const disconnect = useCallback(() => {
@@ -228,13 +232,24 @@ export function useVoiceAgent() {
             const f32 = new Float32Array(i16.length);
             for (let k = 0; k < i16.length; k++) f32[k] = i16[k] / 32768;
             playbackQueue.current.push(f32);
-            void playQueue();
+            playQueue();
             break;
           }
           case "reply.done":
             cfg.onStatus?.("reply.done");
             if (msg.status === "interrupted") {
-              playbackQueue.current = []; // flush stale agent speech on barge-in
+              // Barge-in: drop queued chunks AND stop already-scheduled buffers,
+              // then reset the cursor so the next reply starts immediately.
+              playbackQueue.current = [];
+              activeSourcesRef.current.forEach((s) => {
+                try {
+                  s.stop();
+                } catch {
+                  // already ended
+                }
+              });
+              activeSourcesRef.current.clear();
+              nextTimeRef.current = 0;
             }
             flushToolResults(msg.status === "interrupted");
             break;

@@ -1,7 +1,7 @@
 // Setup form: server component; a plain GET form navigates to /session with query params.
 export default function Home() {
   return (
-    <div className="max-w-md mx-auto p-6 space-y-6">
+    <div className="max-w-md mx-auto p-8 mt-10 bg-white rounded-xl shadow-sm border border-gray-100 space-y-6">
       <header>
         <h1 className="text-2xl font-bold">ReadPulse</h1>
         <p className="text-sm text-gray-600">
@@ -49,7 +49,7 @@ export default function Home() {
 
         <button
           type="submit"
-          className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition-all duration-200 hover:bg-blue-700 hover:shadow-md"
         >
           Start session
         </button>

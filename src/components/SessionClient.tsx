@@ -49,6 +49,9 @@ export default function SessionClient(props: {
       passage,
       agentConfig: {
         instructions: buildInstructions(childName, grade, passage.title),
+        // Verified voice names live in docs/superpowers/specs/assemblyai-voice-agent-facts.md
+        // (anna, alba, jane, michael, charles, paul, vera, ...). Swap to audition.
+        voice: "jane",
         tools: [
           {
             name: "score_reading",
@@ -340,7 +343,7 @@ export default function SessionClient(props: {
   }, [phase, finalTranscript, drillWords, practiceIndex, markPracticed]);
 
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-4">
+    <div className="max-w-3xl mx-auto p-6 space-y-6">
       <header className="flex items-baseline justify-between">
         <h1 className="text-lg font-bold">ReadPulse</h1>
         <p className="text-xs text-gray-500" data-testid="status-line">
@@ -498,7 +501,7 @@ export default function SessionClient(props: {
                   type="button"
                   onClick={markPracticed}
                   data-testid="mark-practiced"
-                  className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+                  className="rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition-all duration-200 hover:bg-blue-700 hover:shadow-md"
                 >
                   Mark as practiced
                 </button>
@@ -559,7 +562,7 @@ export default function SessionClient(props: {
             type="button"
             onClick={() => void finishRan()}
             disabled={ranBusy}
-            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            className="rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition-all duration-200 hover:bg-blue-700 hover:shadow-md disabled:opacity-50"
           >
             Done
           </button>
